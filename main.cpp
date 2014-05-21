@@ -163,19 +163,14 @@ void OpenGLShow(int argc, char** argv)
 	for(int i=0;i<depthdata.size();i++)
 	{
 		Vector3f frame_center;
-		ProjectFromImageToWorld(Vector2i(IMGWIDTH/2,IMGHEIGHT/2),frame_center,depthdata[i][IMGWIDTH*IMGHEIGHT/2],intrinsic,external_array[i]);
+		ProjectFromImageToWorld(Vector2i(IMGWIDTH/2,IMGHEIGHT/2),frame_center,1.0,intrinsic,external_array[i]);
 		for(int j=0;j<3;j++)
-			lookattable[i][j] = external_array[i](j,3);
+		{
+			Matrix4f curext = external_array[i].inverse();
+			lookattable[i][j] = curext(j,3);
+		}
 		for(int j=3;j<6;j++)
-			lookattable[i][j] = frame_center(j-3) - external_array[i](j-3,3);
-	}
-
-	cout<<"Look at table:"<<endl;
-	for(int i=0;i<depthdata.size();i++)
-	{
-		for(int j=0;j<6;j++)
-			cout<<lookattable[i][j]<<' ';
-		cout<<endl;
+			lookattable[i][j] = frame_center(j-3);
 	}
 
 	for(int i=0;i<6;i++)
@@ -195,6 +190,10 @@ void OpenGLShow(int argc, char** argv)
 	//face
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,bo[face]);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER,3*(IMGHEIGHT-1)*(IMGWIDTH-1)*2*sizeof(GLuint),NULL,GL_DYNAMIC_DRAW);
+	GLuint *glface = (GLuint*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER,GL_WRITE_ONLY);
+	for(int i=0;i<(IMGWIDTH-1)*(IMGHEIGHT-1)*2*3;i++) glface[i] = i;
+	glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+
 	//vertex position
 	GLuint loc;
 	glBindBuffer(GL_ARRAY_BUFFER,bo[vertex]);
@@ -222,10 +221,6 @@ void OpenGLShow(int argc, char** argv)
 	glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_RGB,IMGWIDTH,IMGHEIGHT,textureimg.size(),0,GL_BGR,GL_UNSIGNED_BYTE,NULL);
 	for(int i=0;i<textureimg.size();i++)
 		glTexSubImage3D(GL_TEXTURE_2D_ARRAY,0,0,0,i,textureimg[i].cols,textureimg[i].rows,1,GL_BGR,GL_UNSIGNED_BYTE,textureimg[i].data);
-
-	
-
-	data2GPU(currentframe);
 
 	//set callback functions
 	glutKeyboardFunc(ProcessNormalKeys);
@@ -293,11 +288,11 @@ void render()
 	glUniform1i(loc,textureimg.size());
 
 	//current frame
-	//data2GPU(currentframe);
+	data2GPU(currentframe);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,bo[face]);
 	glDrawElements(GL_TRIANGLES,(IMGHEIGHT-1)*(IMGWIDTH-1)*2*3,GL_UNSIGNED_INT,0);
 
-	/*//next frame
+	//next frame
 
 	loc = glGetUniformLocation(_shader.GetProgramID(),"weight");
 	if(loc == -1)
@@ -306,14 +301,15 @@ void render()
 		system("pause");
 	}
 	glUniform1f(loc,1.0-weight_current);
-	glBlendFunc(GL_SRC_ALPHA,GL_DST_ALPHA);
-	glBlendEquation(GL_FUNC_ADD);
 
+	glBlendFunc(GL_ONE,GL_ONE);
+	glBlendEquation(GL_FUNC_ADD);
 	glEnable(GL_BLEND);
+
 	data2GPU(nextframe);
 	glDrawElements(GL_TRIANGLES,(IMGHEIGHT-1)*(IMGWIDTH-1)*2*3,GL_UNSIGNED_INT,0);
 
-	glDisable(GL_BLEND);*/
+	glDisable(GL_BLEND);
 
 	_shader.DisableShader();
 
@@ -330,18 +326,12 @@ void updateview()
 {
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	gluLookAt((GLdouble)curlookat[0], -1*(GLdouble)curlookat[1], (GLdouble)curlookat[2], (GLdouble)curlookat[3], (GLdouble)curlookat[4], (GLdouble)curlookat[5], 0.0, -1.0, 0.0);
+	gluLookAt((GLdouble)curlookat[0], (GLdouble)curlookat[1], (GLdouble)curlookat[2], (GLdouble)curlookat[3], (GLdouble)curlookat[4], (GLdouble)curlookat[5], 0.0, -1.0, 0.0);
 }
 
 void data2GPU(int viewid)
 {
 	int ind = 0;
-	//faces
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,bo[face]);
-	GLuint *glface = (GLuint*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER,GL_WRITE_ONLY);
-	for(int i=0;i<mesh[viewid].n_faces()*3;i++) glface[i] = i;
-	glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
-
 	//vertex position
 	glBindBuffer(GL_ARRAY_BUFFER,bo[vertex]);
 	GLfloat *glposition = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER,GL_WRITE_ONLY);
@@ -405,7 +395,7 @@ void ProcessSpecialKeys(int key,int x,int y)
 				curlookat[j] += difflookat[j];
 			updateview();
 			weight_current -= 1.0/static_cast<float>(INTERPOLATECOUNT);
-			//cout<<weight_current<<endl;
+			cout<<weight_current<<endl;
 			render();
 		}
 
@@ -421,15 +411,18 @@ void ProcessSpecialKeys(int key,int x,int y)
 		for(int i=0;i<6;i++)
 			curlookat[i] = lookattable[currentframe][i];
 		weight_current = 1.0;
-		data2GPU(currentframe);
 		updateview();
-		//render();
-
+		render();
+	}
+	if(key == GLUT_KEY_UP)
+	{
+		curlookat[4] += 0.05;
+		updateview();
 		glutPostRedisplay();
 	}
-	if(key == GLUT_KEY_LEFT)
+	if(key == GLUT_KEY_DOWN)
 	{
-		curlookat[1] -= 0.1;
+		curlookat[4] -= 0.05;
 		updateview();
 		glutPostRedisplay();
 	}

@@ -52,7 +52,7 @@ void readDepth(char *path,int num,int frameinterval,vector<vector<float>>&depthd
 	for(int i=0;i<num;i=i+frameinterval)
 	{
 		char buffer[100];
-		sprintf(buffer,"%s/depth/frame_depth%03d.txt",path,i);
+		sprintf(buffer,"%s/depth/depth_denoise%03d.txt",path,i);
 		ifstream fin(buffer);
 		vector<float>curdepth;
 		float temp;
