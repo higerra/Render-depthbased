@@ -1,8 +1,9 @@
 #define IMGWIDTH 640
 #define IMGHEIGHT 480
-#define FRAMEINTERVAL 5
-#define TOTALNUM 62
+#define FRAMEINTERVAL 20
+#define TOTALNUM 369
 #define INTERPOLATECOUNT 10
+#define DYNNUM 50
 #define BUFFER_OFFSET(i) ((uchar*)NULL + (i))
 
 #include <iostream>
@@ -39,27 +40,33 @@ Shader _shader;
 //path
 char prefix[100];
 
+bool isWriting = true;
+
 //depth data
 vector<vector<float>>depthdata;
 
 //camera parameter
 vector<Matrix4f,aligned_allocator<Matrix4f>> external_array;
 Matrix4f intrinsic;
+Matrix4f dynmask_external;
 
 //texture images
 vector<Mat>textureimg;
+vector<Mat>saveimg;
+Mat dynmask;
 
 //Mesh
 vector<TriMesh>mesh;
-TriMesh largeMesh;
+TriMesh largeMesh;	// !!only for debugging
 vector<vector<Vector2i>>texturecoordinate;
 
 //for navigation
-float curlookat[6] = {};
-float lookattable[TOTALNUM][6] = {};
-float difflookat[6] = {};
+float curlookat[9] = {};
+float lookattable[TOTALNUM][9] = {};
+float difflookat[9] = {};
 static int currentframe = 0;
 static int nextframe = 1;
+int dynaframe = 0;
 
 static float weight_current = 1.0;
 
@@ -78,6 +85,8 @@ GLuint bo[bufferObjectNum];
 
 void OpenGLShow(int argc, char** argv);
 void updateTexture(int viewid);
+void getvideoTexture(int viewid);
+void getColor(int viewid);  //!!only for debugging
 void updateview();
 
 //Glut callback functions
@@ -90,28 +99,29 @@ void data2GPU(int viewid);
 
 int main(int argc,char**argv)
 {
-	sprintf(prefix,"D:/yanhang/RenderProject/room/data5.18");
-	readTexture(prefix,TOTALNUM,FRAMEINTERVAL,textureimg);
+	sprintf(prefix,"D:/yanhang/RenderProject/room/data5.24");
+	readTexture(prefix,TOTALNUM,DYNNUM,FRAMEINTERVAL,textureimg,dynmask);
 
-	readCamera(prefix,TOTALNUM,FRAMEINTERVAL,external_array);
+	readCamera(prefix,TOTALNUM,FRAMEINTERVAL,external_array,dynmask_external);
+
+	cout<<"Dynamask_external: "<<endl<<dynmask_external<<endl;
+
 	intrinsic<<575,0.0,319.5,0.0,0.0,575,239.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
 	readDepth(prefix,TOTALNUM,FRAMEINTERVAL,depthdata);
-	createMesh(depthdata,intrinsic,external_array,mesh);
+	createMesh(depthdata,intrinsic,external_array,mesh,0.4,5.0);
 	computeTextureCoordiante(mesh,intrinsic,external_array);
 
-	cout<<"texture num:"<<textureimg.size()<<endl;
-	cout<<"depth num:"<<depthdata.size()<<endl;
-	cout<<"camera num:"<<external_array.size()<<endl;
-	viewcount = external_array.size();
+	cout<<"Depth count: "<<depthdata.size()<<endl;
+	cout<<"texture count: "<<textureimg.size()<<endl;
 
-	/*for(int i=0;i<mesh.size();i++)
+	/*cout<<"Saving color..."<<endl;
+	for(int i=0;i<mesh.size();i++)
 	{
-		char buffer[100];
-		sprintf(buffer,"%s/pointcloud/frame%03d.off",prefix,i);
-		OpenMesh::IO::write_mesh(mesh[i],string(buffer));
-	}*/
+		//getvideoTexture(i);
+		getColor(i);
+	}
 
-	/*for(int i=0;i<mesh.size();i++)
+	for(int i=0;i<mesh.size();i++)
 	{
 		for(TriMesh::VertexIter v_it = mesh[i].vertices_begin();v_it!=mesh[i].vertices_end();++v_it)
 			largeMesh.add_vertex(mesh[i].point(v_it));
@@ -163,7 +173,14 @@ void OpenGLShow(int argc, char** argv)
 	for(int i=0;i<depthdata.size();i++)
 	{
 		Vector3f frame_center;
+
+		Vector4f updir_homo(0.0,-1.0,0.0,1.0);
+		Vector4f upstd_homo(0.0,-1.0,0.0,1.0);
+
 		ProjectFromImageToWorld(Vector2i(IMGWIDTH/2,IMGHEIGHT/2),frame_center,1.0,intrinsic,external_array[i]);
+
+		updir_homo = external_array[i].inverse()*upstd_homo;
+
 		for(int j=0;j<3;j++)
 		{
 			Matrix4f curext = external_array[i].inverse();
@@ -171,19 +188,21 @@ void OpenGLShow(int argc, char** argv)
 		}
 		for(int j=3;j<6;j++)
 			lookattable[i][j] = frame_center(j-3);
+		for(int j=6;j<9;j++)
+			lookattable[i][j] = updir_homo(j-6);
 	}
 
-	for(int i=0;i<6;i++)
+	for(int i=0;i<9;i++)
 		curlookat[i] = lookattable[currentframe][i];
 
-	for(int i=0;i<6;i++)
+	for(int i=0;i<9;i++)
 		difflookat[i] = (lookattable[nextframe][i] - lookattable[currentframe][i])/static_cast<float>(INTERPOLATECOUNT);
 
 	updateview();
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(30.0,(float)IMGWIDTH/(float)IMGHEIGHT,0.001,5.0);
+	gluPerspective(35.0,(float)IMGWIDTH/(float)IMGHEIGHT,0.001,5.0);
 
 	//Buffer Objects
 	glGenBuffers(bufferObjectNum,bo);
@@ -226,7 +245,7 @@ void OpenGLShow(int argc, char** argv)
 	glutKeyboardFunc(ProcessNormalKeys);
 	glutSpecialFunc(ProcessSpecialKeys);
 	glutDisplayFunc(render);
-	//glutIdleFunc(idlefunction);
+	glutIdleFunc(idlefunction);
 	glutCloseFunc(close);
 	glutMainLoop();
 
@@ -313,21 +332,83 @@ void render()
 
 	_shader.DisableShader();
 
+	//save the image
+	if(isWriting && saveimg.size()<1000)
+	{
+		glReadBuffer(GL_BACK);
+		Mat curimg = Mat(IMGHEIGHT,IMGWIDTH,CV_8UC3);
+		glReadPixels(0,0,IMGWIDTH,IMGHEIGHT,GL_BGR,GL_UNSIGNED_BYTE,curimg.data);
+		flip(curimg,curimg,0);
+		saveimg.push_back(curimg);
+	}
+
 	glFlush();
 	glutSwapBuffers();
 }
 
+void getColor(int viewid)
+{
+	for(TriMesh::VertexIter v_it = mesh[viewid].vertices_begin();v_it!=mesh[viewid].vertices_end();++v_it)
+	{
+		TriMesh::Point curpt = mesh[viewid].point(v_it);
+		Vector2i curtex;
+		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),curtex,intrinsic,external_array[viewid]);
+		if(isValid(curtex,IMGWIDTH,IMGHEIGHT))
+		{
+			Vec3b curPix = textureimg[viewid].at<Vec3b>(curtex[1],curtex[0]);
+			TriMesh::Color curcolor = TriMesh::Color(curPix[2],curPix[1],curPix[1]);
+			mesh[viewid].set_color(v_it,curcolor);
+		}
+	}
+
+	char colorpath[100];
+	sprintf(colorpath,"%s/pointcloud/colorcloud%03d.off",prefix,viewid);
+	OpenMesh::IO::Options wopt;
+	wopt += OpenMesh::IO::Options::VertexColor;
+	OpenMesh::IO::write_mesh(mesh[viewid],string(colorpath),wopt);
+
+}
+
 void idlefunction()
 {
+	if(dynaframe == DYNNUM)
+		dynaframe = 0;
+	else
+		dynaframe++;
 
+	getvideoTexture(currentframe);
+
+	getvideoTexture(nextframe);
+
+	render();
+}
+
+void getvideoTexture(int viewid)
+{
+	for(TriMesh::VertexIter v_it = mesh[viewid].vertices_begin();v_it!=mesh[viewid].vertices_end();++v_it)
+	{
+		TriMesh::Point curpt = mesh[viewid].point(v_it);
+		Vector2i imgPt;
+		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic,dynmask_external);
+		if(isValid(imgPt,IMGWIDTH,IMGHEIGHT))
+		{
+			int locmask = static_cast<int>(dynmask.at<uchar>(imgPt[1],imgPt[0]));
+			if(locmask > 200)
+			{
+				TriMesh::TexCoord3D curtex = TriMesh::TexCoord3D(imgPt[0],imgPt[1],dynaframe);
+				mesh[viewid].set_texcoord3D(v_it,curtex);
+			}
+		}
+	}
 }
 
 void updateview()
 {
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	gluLookAt((GLdouble)curlookat[0], (GLdouble)curlookat[1], (GLdouble)curlookat[2], (GLdouble)curlookat[3], (GLdouble)curlookat[4], (GLdouble)curlookat[5], 0.0, -1.0, 0.0);
+	gluLookAt((GLdouble)curlookat[0], (GLdouble)curlookat[1], (GLdouble)curlookat[2], (GLdouble)curlookat[3], (GLdouble)curlookat[4], (GLdouble)curlookat[5],(GLdouble)curlookat[6], (GLdouble)curlookat[7],(GLdouble)curlookat[8]);
 }
+
 
 void data2GPU(int viewid)
 {
@@ -381,6 +462,17 @@ void close()
 
 void ProcessNormalKeys(unsigned char key,int x,int y)
 {
+	if(key == 's' || key=='S')
+	{
+		cout<<"Saving..."<<endl;
+		for(int i=0;i<saveimg.size();i++)
+		{
+			char buffer[100];
+			sprintf(buffer,"%s/save/frame%03d.png",prefix,i);
+			imwrite(buffer,saveimg[i]);
+		}
+		cout<<"Save complete!"<<endl;
+	}
 }
 
 void ProcessSpecialKeys(int key,int x,int y)
@@ -391,11 +483,10 @@ void ProcessSpecialKeys(int key,int x,int y)
 
 		for(int i=0;i<INTERPOLATECOUNT-1;i++)
 		{
-			for(int j=0;j<6;j++)
+			for(int j=0;j<9;j++)
 				curlookat[j] += difflookat[j];
 			updateview();
 			weight_current -= 1.0/static_cast<float>(INTERPOLATECOUNT);
-			cout<<weight_current<<endl;
 			render();
 		}
 
@@ -405,14 +496,23 @@ void ProcessSpecialKeys(int key,int x,int y)
 		if(nextframe == depthdata.size())
 			nextframe = 0;
 
-		for(int i=0;i<6;i++)
+		for(int i=0;i<9;i++)
 			difflookat[i] = (lookattable[nextframe][i]-lookattable[currentframe][i])/static_cast<float>(INTERPOLATECOUNT);
 
-		for(int i=0;i<6;i++)
+		for(int i=0;i<9;i++)
 			curlookat[i] = lookattable[currentframe][i];
 		weight_current = 1.0;
 		updateview();
 		render();
+	}
+	if(key == GLUT_KEY_LEFT)
+	{
+		nextframe = currentframe;
+		if(currentframe == 0)
+			currentframe = depthdata.size()-1;
+		else
+			currentframe--;
+		glutPostRedisplay();
 	}
 	if(key == GLUT_KEY_UP)
 	{

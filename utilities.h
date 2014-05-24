@@ -14,9 +14,18 @@ using namespace Eigen;
 
 typedef OpenMesh::TriMesh_ArrayKernelT<> TriMesh;
 
-void readTexture(char *path,int num,int frameinterval,vector<Mat>&textureimg)
+void readTexture(char *path,int num,int dynnum,int frameinterval,vector<Mat>&textureimg,Mat &mask)
 {
 	cout<<"reading texture..."<<endl;
+	for(int i=0;i<dynnum;i++)
+	{
+		char dynbuffer[100];
+		sprintf(dynbuffer,"%s/image/dynarea%03d.png",path,i);
+		Mat curdyn = imread(dynbuffer);
+		flip(curdyn,curdyn,1);
+		textureimg.push_back(curdyn);
+	}
+
 	for(int i=0;i<num;i=i+frameinterval)
 	{
 		char buffer[100];
@@ -25,9 +34,15 @@ void readTexture(char *path,int num,int frameinterval,vector<Mat>&textureimg)
 		flip(curimg,curimg,1);
 		textureimg.push_back(curimg);
 	}
+	char buffer[100];
+	sprintf(buffer,"%s/image/frame_reference.png",path);
+	mask = imread(string(buffer));
+	cvtColor(mask,mask,CV_RGB2GRAY);
+	flip(mask,mask,1);
+
 }
 
-void readCamera(char *path,int num,int frameinterval,vector<Matrix4f,aligned_allocator<Matrix4f>>&external)
+void readCamera(char *path,int num,int frameinterval,vector<Matrix4f,aligned_allocator<Matrix4f>>&external,Matrix4f &dynmask_external)
 {
 	cout<<"reading camera..."<<endl;
 	for(int i=0;i<num;i=i+frameinterval)
@@ -43,7 +58,19 @@ void readCamera(char *path,int num,int frameinterval,vector<Matrix4f,aligned_all
 		}
 		temp(3,3) = 1.0;
 		external.push_back(temp.transpose());
+		fin.close();
 	}
+	
+	char buffer[100];
+	sprintf(buffer,"%s/Geometry/frame_reference.txt",path);
+	ifstream maskfin(buffer);
+	for(int y=0;y<4;y++)
+	{
+		for(int x=0;x<4;x++)
+			maskfin>>dynmask_external(y,x);
+	}
+	dynmask_external(3,3) = 1.0;
+	dynmask_external.transposeInPlace();
 }
 
 void readDepth(char *path,int num,int frameinterval,vector<vector<float>>&depthdata)
@@ -91,13 +118,14 @@ void ProjectFromImageToWorld(Vector2i src,Vector3f &dst,float depth,Matrix4f int
 	dst[2] = world_homo[2]/world_homo[3];
 }
 
-void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4f,aligned_allocator<Matrix4f>>external,vector<TriMesh>&mesh)
+void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4f,aligned_allocator<Matrix4f>>external,vector<TriMesh>&mesh,float mindistance,float maxdistance)
 {
 	cout<<"Creating mesh..."<<endl;
 	for(int curframe = 0;curframe<depthdata.size();curframe++)
 	{
 		TriMesh curmesh;
 		curmesh.request_vertex_texcoords3D();
+		curmesh.request_vertex_colors();
 		TriMesh::VertexHandle vhandle[IMGWIDTH*IMGHEIGHT];
 
 		//vertex
@@ -124,7 +152,8 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 				int v4 = y*IMGWIDTH+x+1;
 				
 				//There are holes in the depthmap, we have to avoid these holes
-				int validcount = (int)(depthdata[curframe][v1]>0) + (int)(depthdata[curframe][v2]>0) + (int)(depthdata[curframe][v3]>0) + (int)(depthdata[curframe][v4]>0);
+				int validcount = ((depthdata[curframe][v1]>mindistance)&&(depthdata[curframe][v1]<maxdistance)) + ((depthdata[curframe][v2]>mindistance)&&(depthdata[curframe][v2]<maxdistance))
+					+ ((depthdata[curframe][v3]>mindistance)&&(depthdata[curframe][v3]<maxdistance)) + ((depthdata[curframe][v4]>mindistance)&&(depthdata[curframe][v4]<maxdistance));
 				if(validcount == 4)
 				{
 					face_vhandles.clear();
@@ -141,7 +170,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 				}
 				if(validcount == 3)
 				{
-					if(depthdata[curframe][v1] == 0)
+					if(depthdata[curframe][v1] <mindistance || depthdata[curframe][v1]>maxdistance)
 					{
 						face_vhandles.clear();
 						face_vhandles.push_back(vhandle[v2]);
@@ -149,7 +178,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 						face_vhandles.push_back(vhandle[v4]);
 						curmesh.add_face(face_vhandles);
 					}
-					if(depthdata[curframe][v2] == 0)
+					if(depthdata[curframe][v2] <mindistance || depthdata[curframe][v2]>maxdistance)
 					{
 						face_vhandles.clear();
 						face_vhandles.push_back(vhandle[v1]);
@@ -157,7 +186,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 						face_vhandles.push_back(vhandle[v4]);
 						curmesh.add_face(face_vhandles);
 					}
-					if(depthdata[curframe][v3] == 0)
+					if(depthdata[curframe][v3] <mindistance || depthdata[curframe][v2]>maxdistance)
 					{
 						face_vhandles.clear();
 						face_vhandles.push_back(vhandle[v1]);
@@ -165,7 +194,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 						face_vhandles.push_back(vhandle[v4]);
 						curmesh.add_face(face_vhandles);
 					}
-					if(depthdata[curframe][v4] == 0)
+					if(depthdata[curframe][v4] <mindistance || depthdata[curframe][v2]>maxdistance)
 					{
 						face_vhandles.clear();
 						face_vhandles.push_back(vhandle[v1]);
@@ -190,10 +219,11 @@ void computeTextureCoordiante(vector<TriMesh>&mesh,Matrix4f intrinsic,vector<Mat
 		{
 			TriMesh::Point curpt = mesh[i].point(v_it);
 			Vector2i imgPt;
+
 			ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic,external[i]);
 			if(isValid(imgPt,IMGWIDTH,IMGHEIGHT))
 			{
-				TriMesh::TexCoord3D tex= TriMesh::TexCoord3D(imgPt[0],imgPt[1],i);
+				TriMesh::TexCoord3D tex= TriMesh::TexCoord3D(imgPt[0],imgPt[1],i+DYNNUM);
 				mesh[i].set_texcoord3D(v_it,tex);
 			}
 		}
