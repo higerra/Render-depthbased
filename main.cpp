@@ -59,6 +59,7 @@ Mat dynmask;
 vector<TriMesh>mesh;
 TriMesh largeMesh;	// !!only for debugging
 vector<vector<Vector2i>>texturecoordinate;
+vector<int> facenumber;
 
 //for navigation
 float curlookat[9] = {};
@@ -104,24 +105,21 @@ int main(int argc,char**argv)
 
 	readCamera(prefix,TOTALNUM,FRAMEINTERVAL,external_array,dynmask_external);
 
-	cout<<"Dynamask_external: "<<endl<<dynmask_external<<endl;
-
 	intrinsic<<575,0.0,319.5,0.0,0.0,575,239.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
 	readDepth(prefix,TOTALNUM,FRAMEINTERVAL,depthdata);
-	createMesh(depthdata,intrinsic,external_array,mesh,0.4,5.0);
+	createMesh(depthdata,intrinsic,external_array,mesh,0.4,5.0,facenumber);
+
 	computeTextureCoordiante(mesh,intrinsic,external_array);
 
-	cout<<"Depth count: "<<depthdata.size()<<endl;
-	cout<<"texture count: "<<textureimg.size()<<endl;
 
 	/*cout<<"Saving color..."<<endl;
 	for(int i=0;i<mesh.size();i++)
 	{
 		//getvideoTexture(i);
 		getColor(i);
-	}
+	}*/
 
-	for(int i=0;i<mesh.size();i++)
+	/*for(int i=0;i<mesh.size();i++)
 	{
 		for(TriMesh::VertexIter v_it = mesh[i].vertices_begin();v_it!=mesh[i].vertices_end();++v_it)
 			largeMesh.add_vertex(mesh[i].point(v_it));
@@ -309,7 +307,7 @@ void render()
 	//current frame
 	data2GPU(currentframe);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,bo[face]);
-	glDrawElements(GL_TRIANGLES,(IMGHEIGHT-1)*(IMGWIDTH-1)*2*3,GL_UNSIGNED_INT,0);
+	glDrawElements(GL_TRIANGLES,facenumber[currentframe]*3,GL_UNSIGNED_INT,0);
 
 	//next frame
 
@@ -326,7 +324,7 @@ void render()
 	glEnable(GL_BLEND);
 
 	data2GPU(nextframe);
-	glDrawElements(GL_TRIANGLES,(IMGHEIGHT-1)*(IMGWIDTH-1)*2*3,GL_UNSIGNED_INT,0);
+	glDrawElements(GL_TRIANGLES,facenumber[nextframe]*3,GL_UNSIGNED_INT,0);
 
 	glDisable(GL_BLEND);
 
@@ -355,7 +353,7 @@ void getColor(int viewid)
 		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),curtex,intrinsic,external_array[viewid]);
 		if(isValid(curtex,IMGWIDTH,IMGHEIGHT))
 		{
-			Vec3b curPix = textureimg[viewid].at<Vec3b>(curtex[1],curtex[0]);
+			Vec3b curPix = textureimg[viewid+DYNNUM].at<Vec3b>(curtex[1],curtex[0]);
 			TriMesh::Color curcolor = TriMesh::Color(curPix[2],curPix[1],curPix[1]);
 			mesh[viewid].set_color(v_it,curcolor);
 		}
@@ -408,7 +406,6 @@ void updateview()
 	glLoadIdentity();
 	gluLookAt((GLdouble)curlookat[0], (GLdouble)curlookat[1], (GLdouble)curlookat[2], (GLdouble)curlookat[3], (GLdouble)curlookat[4], (GLdouble)curlookat[5],(GLdouble)curlookat[6], (GLdouble)curlookat[7],(GLdouble)curlookat[8]);
 }
-
 
 void data2GPU(int viewid)
 {

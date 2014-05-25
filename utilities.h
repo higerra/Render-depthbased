@@ -118,7 +118,7 @@ void ProjectFromImageToWorld(Vector2i src,Vector3f &dst,float depth,Matrix4f int
 	dst[2] = world_homo[2]/world_homo[3];
 }
 
-void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4f,aligned_allocator<Matrix4f>>external,vector<TriMesh>&mesh,float mindistance,float maxdistance)
+void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4f,aligned_allocator<Matrix4f>>external,vector<TriMesh>&mesh,float mindistance,float maxdistance,vector<int>&facenumber)
 {
 	cout<<"Creating mesh..."<<endl;
 	for(int curframe = 0;curframe<depthdata.size();curframe++)
@@ -207,6 +207,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 		}
 
 		mesh.push_back(curmesh);
+		facenumber.push_back(curmesh.n_faces());
 	}
 
 }
