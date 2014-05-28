@@ -17,28 +17,28 @@ typedef OpenMesh::TriMesh_ArrayKernelT<> TriMesh;
 void readTexture(char *path,int num,int dynnum,int frameinterval,vector<Mat>&textureimg,Mat &mask)
 {
 	cout<<"reading texture..."<<endl;
-	for(int i=0;i<dynnum;i++)
+	/*for(int i=0;i<dynnum;i++)
 	{
 		char dynbuffer[100];
 		sprintf(dynbuffer,"%s/image/dynarea%03d.png",path,i);
 		Mat curdyn = imread(dynbuffer);
 		flip(curdyn,curdyn,1);
 		textureimg.push_back(curdyn);
-	}
+	}*/
 
 	for(int i=0;i<num;i=i+frameinterval)
 	{
 		char buffer[100];
-		sprintf(buffer,"%s/image/frame%03d.png",path,i);
+		sprintf(buffer,"%s/image/frame%03d_2.png",path,i);
 		Mat curimg = imread(string(buffer));
 		flip(curimg,curimg,1);
 		textureimg.push_back(curimg);
 	}
-	char buffer[100];
+	/*char buffer[100];
 	sprintf(buffer,"%s/image/frame_reference.png",path);
 	mask = imread(string(buffer));
 	cvtColor(mask,mask,CV_RGB2GRAY);
-	flip(mask,mask,1);
+	flip(mask,mask,1);*/
 
 }
 
@@ -61,7 +61,7 @@ void readCamera(char *path,int num,int frameinterval,vector<Matrix4f,aligned_all
 		fin.close();
 	}
 	
-	char buffer[100];
+	/*char buffer[100];
 	sprintf(buffer,"%s/Geometry/frame_reference.txt",path);
 	ifstream maskfin(buffer);
 	for(int y=0;y<4;y++)
@@ -70,7 +70,7 @@ void readCamera(char *path,int num,int frameinterval,vector<Matrix4f,aligned_all
 			maskfin>>dynmask_external(y,x);
 	}
 	dynmask_external(3,3) = 1.0;
-	dynmask_external.transposeInPlace();
+	dynmask_external.transposeInPlace();*/
 }
 
 void readDepth(char *path,int num,int frameinterval,vector<vector<float>>&depthdata)
@@ -78,12 +78,13 @@ void readDepth(char *path,int num,int frameinterval,vector<vector<float>>&depthd
 	cout<<"reading depth..."<<endl;
 	for(int i=0;i<num;i=i+frameinterval)
 	{
+		cout<<i<<' ';
 		char buffer[100];
-		sprintf(buffer,"%s/depth/depth_denoise%03d.txt",path,i);
+		sprintf(buffer,"%s/depth/frame_depth%03d.txt",path,i);
 		ifstream fin(buffer);
 		vector<float>curdepth;
 		float temp;
-		for(int i=0;i<IMGWIDTH*IMGHEIGHT;i++)
+		for(int i=0;i<DEPTHWIDTH*DEPTHHEIGHT;i++)
 		{
 			fin>>temp;
 			curdepth.push_back(temp);
@@ -91,6 +92,7 @@ void readDepth(char *path,int num,int frameinterval,vector<vector<float>>&depthd
 		fin.close();
 		depthdata.push_back(curdepth);
 	}
+	cout<<endl;
 }
 
 bool isValid(Vector2i imgPoint,int width,int height)
@@ -126,30 +128,30 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 		TriMesh curmesh;
 		curmesh.request_vertex_texcoords3D();
 		curmesh.request_vertex_colors();
-		TriMesh::VertexHandle vhandle[IMGWIDTH*IMGHEIGHT];
+		TriMesh::VertexHandle vhandle[DEPTHWIDTH*DEPTHHEIGHT];
 
 		//vertex
-		for(int y=0;y<IMGHEIGHT;y++)
+		for(int y=0;y<DEPTHHEIGHT;y++)
 		{
-			for(int x=0;x<IMGWIDTH;x++)
+			for(int x=0;x<DEPTHWIDTH;x++)
 			{
 				Vector3f curworldpt;
-				ProjectFromImageToWorld(Vector2i(x,y),curworldpt,depthdata[curframe][y*IMGWIDTH+x],intrinsic,external[curframe]);
-				vhandle[y*IMGWIDTH+x] = curmesh.add_vertex(TriMesh::Point(curworldpt[0],curworldpt[1],curworldpt[2]));
+				ProjectFromImageToWorld(Vector2i(x,y),curworldpt,depthdata[curframe][y*DEPTHWIDTH+x],intrinsic,external[curframe]);
+				vhandle[y*DEPTHWIDTH+x] = curmesh.add_vertex(TriMesh::Point(curworldpt[0],curworldpt[1],curworldpt[2]));
 			}
 		}
 
 		//face
 		vector<TriMesh::VertexHandle> face_vhandles;
-		for(int y=0;y<IMGHEIGHT-1;y++)
+		for(int y=0;y<DEPTHHEIGHT-1;y++)
 		{
-			for(int x=0;x<IMGWIDTH-1;x++)
+			for(int x=0;x<DEPTHWIDTH-1;x++)
 			{
 				//anticlockwise
-				int v1 = y*IMGWIDTH+x;
-				int v2 = (y+1)*IMGWIDTH+x;
-				int v3 = (y+1)*IMGWIDTH+x+1;
-				int v4 = y*IMGWIDTH+x+1;
+				int v1 = y*DEPTHWIDTH+x;
+				int v2 = (y+1)*DEPTHWIDTH+x;
+				int v3 = (y+1)*DEPTHWIDTH+x+1;
+				int v4 = y*DEPTHWIDTH+x+1;
 				
 				//There are holes in the depthmap, we have to avoid these holes
 				int validcount = ((depthdata[curframe][v1]>mindistance)&&(depthdata[curframe][v1]<maxdistance)) + ((depthdata[curframe][v2]>mindistance)&&(depthdata[curframe][v2]<maxdistance))
@@ -212,7 +214,7 @@ void createMesh(vector<vector<float>>depthdata,Matrix4f intrinsic,vector<Matrix4
 
 }
 
-void computeTextureCoordiante(vector<TriMesh>&mesh,Matrix4f intrinsic,vector<Matrix4f,aligned_allocator<Matrix4f>>external)
+void computeTextureCoordiante(vector<TriMesh>&mesh,Matrix4f intrinsic_RGB,vector<Matrix4f,aligned_allocator<Matrix4f>>external,Matrix4f external_depth_to_RGB)
 {
 	for(int i=0;i<mesh.size();i++)
 	{
@@ -221,8 +223,8 @@ void computeTextureCoordiante(vector<TriMesh>&mesh,Matrix4f intrinsic,vector<Mat
 			TriMesh::Point curpt = mesh[i].point(v_it);
 			Vector2i imgPt;
 
-			ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic,external[i]);
-			if(isValid(imgPt,IMGWIDTH,IMGHEIGHT))
+			ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic_RGB,external_depth_to_RGB*external[i]);
+			if(isValid(imgPt,COLORWIDTH,COLORHEIGHT))
 			{
 				TriMesh::TexCoord3D tex= TriMesh::TexCoord3D(imgPt[0],imgPt[1],i+DYNNUM);
 				mesh[i].set_texcoord3D(v_it,tex);

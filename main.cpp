@@ -1,9 +1,11 @@
-#define IMGWIDTH 640
-#define IMGHEIGHT 480
-#define FRAMEINTERVAL 20
-#define TOTALNUM 369
+#define DEPTHWIDTH 640
+#define DEPTHHEIGHT 480
+#define COLORWIDTH 1280
+#define COLORHEIGHT 960
+#define FRAMEINTERVAL 10
+#define TOTALNUM 141
 #define INTERPOLATECOUNT 10
-#define DYNNUM 50
+#define DYNNUM 0
 #define BUFFER_OFFSET(i) ((uchar*)NULL + (i))
 
 #include <iostream>
@@ -47,7 +49,9 @@ vector<vector<float>>depthdata;
 
 //camera parameter
 vector<Matrix4f,aligned_allocator<Matrix4f>> external_array;
-Matrix4f intrinsic;
+Matrix4f intrinsic_depth;
+Matrix4f intrinsic_RGB;
+Matrix4f external_depth_to_RGB;
 Matrix4f dynmask_external;
 
 //texture images
@@ -100,16 +104,24 @@ void data2GPU(int viewid);
 
 int main(int argc,char**argv)
 {
-	sprintf(prefix,"D:/yanhang/RenderProject/room/data5.24");
+	sprintf(prefix,"D:/yanhang/RenderProject/room/data5.28_high");
 	readTexture(prefix,TOTALNUM,DYNNUM,FRAMEINTERVAL,textureimg,dynmask);
 
 	readCamera(prefix,TOTALNUM,FRAMEINTERVAL,external_array,dynmask_external);
 
-	intrinsic<<575,0.0,319.5,0.0,0.0,575,239.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
-	readDepth(prefix,TOTALNUM,FRAMEINTERVAL,depthdata);
-	createMesh(depthdata,intrinsic,external_array,mesh,0.4,5.0,facenumber);
+	intrinsic_depth<<575,0.0,319.5,0.0,0.0,575,239.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
+	//intrinsic_RGB<<525,0.0,319.5,0.0,0.0,525,239.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
+	intrinsic_RGB<<1086.433,0.0,639.5,0.0,0.0,1086.433,479.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0;
 
-	computeTextureCoordiante(mesh,intrinsic,external_array);
+	external_depth_to_RGB<<1.0,0.0,0.0,-0.025,
+							0.0,1.0,0.0,0.02,
+							0.0,0.0,1.0,-0.00218,
+							0.0,0.0,0.0,1.0;
+
+	readDepth(prefix,TOTALNUM,FRAMEINTERVAL,depthdata);
+	createMesh(depthdata,intrinsic_depth,external_array,mesh,0.4,5.0,facenumber);
+
+	computeTextureCoordiante(mesh,intrinsic_RGB,external_array,external_depth_to_RGB);
 
 
 	/*cout<<"Saving color..."<<endl;
@@ -137,7 +149,7 @@ void OpenGLShow(int argc, char** argv)
 {
 	glutInit(&argc,argv);
 	glutInitDisplayMode(GLUT_DEPTH|GLUT_DOUBLE|GLUT_RGBA);
-	glutInitWindowSize(IMGWIDTH,IMGHEIGHT);
+	glutInitWindowSize(DEPTHWIDTH,DEPTHHEIGHT);
 	glutInitWindowPosition(100,100);
 	glutCreateWindow("View-dependent & time-dependent Rendering");
 
@@ -165,7 +177,7 @@ void OpenGLShow(int argc, char** argv)
 	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
 	//set camera
-	glViewport(0,0,IMGWIDTH,IMGHEIGHT);
+	glViewport(0,0,DEPTHWIDTH,DEPTHHEIGHT);
 	glGetIntegerv(GL_VIEWPORT,mat_viewport);
 
 	for(int i=0;i<depthdata.size();i++)
@@ -175,7 +187,7 @@ void OpenGLShow(int argc, char** argv)
 		Vector4f updir_homo(0.0,-1.0,0.0,1.0);
 		Vector4f upstd_homo(0.0,-1.0,0.0,1.0);
 
-		ProjectFromImageToWorld(Vector2i(IMGWIDTH/2,IMGHEIGHT/2),frame_center,1.0,intrinsic,external_array[i]);
+		ProjectFromImageToWorld(Vector2i(DEPTHWIDTH/2,DEPTHHEIGHT/2),frame_center,1.0,intrinsic_depth,external_array[i]);
 
 		updir_homo = external_array[i].inverse()*upstd_homo;
 
@@ -200,27 +212,27 @@ void OpenGLShow(int argc, char** argv)
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(35.0,(float)IMGWIDTH/(float)IMGHEIGHT,0.001,5.0);
+	gluPerspective(35.0,(float)DEPTHWIDTH/(float)DEPTHHEIGHT,0.001,5.0);
 
 	//Buffer Objects
 	glGenBuffers(bufferObjectNum,bo);
 	//face
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,bo[face]);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,3*(IMGHEIGHT-1)*(IMGWIDTH-1)*2*sizeof(GLuint),NULL,GL_DYNAMIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,3*(DEPTHHEIGHT-1)*(DEPTHWIDTH-1)*2*sizeof(GLuint),NULL,GL_DYNAMIC_DRAW);
 	GLuint *glface = (GLuint*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER,GL_WRITE_ONLY);
-	for(int i=0;i<(IMGWIDTH-1)*(IMGHEIGHT-1)*2*3;i++) glface[i] = i;
+	for(int i=0;i<(DEPTHWIDTH-1)*(DEPTHHEIGHT-1)*2*3;i++) glface[i] = i;
 	glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
 
 	//vertex position
 	GLuint loc;
 	glBindBuffer(GL_ARRAY_BUFFER,bo[vertex]);
-	glBufferData(GL_ARRAY_BUFFER,9*(IMGHEIGHT-1)*(IMGWIDTH-1)*2*sizeof(GLfloat),NULL,GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,9*(DEPTHHEIGHT-1)*(DEPTHWIDTH-1)*2*sizeof(GLfloat),NULL,GL_DYNAMIC_DRAW);
 	loc = glGetAttribLocation(_shader.GetProgramID(),"position");
 	glEnableVertexAttribArray(loc);
 	glVertexAttribPointer(loc,3,GL_FLOAT,0,0,BUFFER_OFFSET(0));
 	//texture coordinate
 	glBindBuffer(GL_ARRAY_BUFFER,bo[texcoord]);
-	glBufferData(GL_ARRAY_BUFFER,9*(IMGHEIGHT-1)*(IMGWIDTH-1)*2*sizeof(GLfloat),NULL,GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,9*(DEPTHHEIGHT-1)*(DEPTHWIDTH-1)*2*sizeof(GLfloat),NULL,GL_DYNAMIC_DRAW);
 	loc = glGetAttribLocation(_shader.GetProgramID(),"texcoord");
 	glEnableVertexAttribArray(loc);
 	glVertexAttribPointer(loc,3,GL_FLOAT,0,0,BUFFER_OFFSET(0));
@@ -235,7 +247,7 @@ void OpenGLShow(int argc, char** argv)
 	glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_S,GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_T,GL_REPEAT);
 	glTexEnvf(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-	glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_RGB,IMGWIDTH,IMGHEIGHT,textureimg.size(),0,GL_BGR,GL_UNSIGNED_BYTE,NULL);
+	glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_RGB,COLORWIDTH,COLORHEIGHT,textureimg.size(),0,GL_BGR,GL_UNSIGNED_BYTE,NULL);
 	for(int i=0;i<textureimg.size();i++)
 		glTexSubImage3D(GL_TEXTURE_2D_ARRAY,0,0,0,i,textureimg[i].cols,textureimg[i].rows,1,GL_BGR,GL_UNSIGNED_BYTE,textureimg[i].data);
 
@@ -256,6 +268,8 @@ void render()
 {
 	glClearColor(0.0,0.0,0.0,1.0);
 	glClear(GL_COLOR_BUFFER_BIT);
+
+	glShadeModel(GL_SMOOTH);
 
 	_shader.EnableShader();
 
@@ -334,8 +348,8 @@ void render()
 	if(isWriting && saveimg.size()<1000)
 	{
 		glReadBuffer(GL_BACK);
-		Mat curimg = Mat(IMGHEIGHT,IMGWIDTH,CV_8UC3);
-		glReadPixels(0,0,IMGWIDTH,IMGHEIGHT,GL_BGR,GL_UNSIGNED_BYTE,curimg.data);
+		Mat curimg = Mat(DEPTHHEIGHT,DEPTHWIDTH,CV_8UC3);
+		glReadPixels(0,0,DEPTHWIDTH,DEPTHHEIGHT,GL_BGR,GL_UNSIGNED_BYTE,curimg.data);
 		flip(curimg,curimg,0);
 		saveimg.push_back(curimg);
 	}
@@ -350,11 +364,11 @@ void getColor(int viewid)
 	{
 		TriMesh::Point curpt = mesh[viewid].point(v_it);
 		Vector2i curtex;
-		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),curtex,intrinsic,external_array[viewid]);
-		if(isValid(curtex,IMGWIDTH,IMGHEIGHT))
+		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),curtex,intrinsic_RGB,external_depth_to_RGB*external_array[viewid]);
+		if(isValid(curtex,COLORWIDTH,COLORHEIGHT))
 		{
 			Vec3b curPix = textureimg[viewid+DYNNUM].at<Vec3b>(curtex[1],curtex[0]);
-			TriMesh::Color curcolor = TriMesh::Color(curPix[2],curPix[1],curPix[1]);
+			TriMesh::Color curcolor = TriMesh::Color(curPix[2],curPix[1],curPix[0]);
 			mesh[viewid].set_color(v_it,curcolor);
 		}
 	}
@@ -387,8 +401,8 @@ void getvideoTexture(int viewid)
 	{
 		TriMesh::Point curpt = mesh[viewid].point(v_it);
 		Vector2i imgPt;
-		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic,dynmask_external);
-		if(isValid(imgPt,IMGWIDTH,IMGHEIGHT))
+		ProjectFromWorldToImage(Vector3f(curpt[0],curpt[1],curpt[2]),imgPt,intrinsic_RGB,external_depth_to_RGB*dynmask_external);
+		if(isValid(imgPt,COLORWIDTH,COLORHEIGHT))
 		{
 			int locmask = static_cast<int>(dynmask.at<uchar>(imgPt[1],imgPt[0]));
 			if(locmask > 200)
@@ -442,8 +456,8 @@ void updateTexture(int viewid)
 		for(TriMesh::FaceVertexIter fv_it = mesh[viewid].fv_iter(f_it);fv_it;++fv_it)
 		{
 			TriMesh::TexCoord3D curtex = mesh[viewid].texcoord3D(fv_it);
-			gltexcoord[ind*3+0] = (GLfloat)(static_cast<float>(curtex[0])/static_cast<float>(IMGWIDTH));
-			gltexcoord[ind*3+1] = (GLfloat)(static_cast<float>(curtex[1])/static_cast<float>(IMGHEIGHT));
+			gltexcoord[ind*3+0] = (GLfloat)(static_cast<float>(curtex[0])/static_cast<float>(COLORWIDTH));
+			gltexcoord[ind*3+1] = (GLfloat)(static_cast<float>(curtex[1])/static_cast<float>(COLORHEIGHT));
 			gltexcoord[ind*3+2] = (GLfloat)curtex[2];
 			ind++;
 		}
